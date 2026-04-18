@@ -10,7 +10,7 @@ if not st.session_state.autenticado:
     with st.form("login"):
         senha = st.text_input("Senha:", type="password")
         if st.form_submit_button("Entrar"):
-            if senha == "1234":
+            if senha == "1006":
                 st.session_state.autenticado = True
                 st.rerun()
             else:
