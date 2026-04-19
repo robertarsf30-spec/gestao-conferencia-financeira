@@ -6,110 +6,110 @@ import openpyxl
 import re
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Sistema de Gestão Cielo", layout="wide")
+st.set_page_config(page_title="Sistema Gestão 20/20", layout="wide")
+
+# --- DEFINIÇÃO DA SENHA (Mude aqui se quiser) ---
+SENHA_CORRETA = "1234" 
 
 # 2. INICIALIZAÇÃO DO ESTADO DE ACESSO
-if 'auth' not in st.session_state:
-    st.session_state.auth = False
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
 
-# Funções de Controle
-def entrar_no_sistema():
-    st.session_state.auth = True
+# Funções de Acesso
+def realizar_login(senha_digitada):
+    if senha_digitada == SENHA_CORRETA:
+        st.session_state.autenticado = True
+        st.success("Acesso liberado!")
+    else:
+        st.error("Senha incorreta. Acesso Negado.")
 
-def sair_do_sistema():
-    st.session_state.auth = False
-    st.cache_data.clear() # Limpa o cache dos arquivos PDF
+def realizar_logout():
+    st.session_state.autenticado = False
+    st.cache_data.clear()
     st.rerun()
 
-# --- LÓGICA DE EXIBIÇÃO ---
+# --- FLUXO DE TELAS ---
 
-if not st.session_state.auth:
-    # --- TELA DE LOGIN (ABRIR) ---
+if not st.session_state.autenticado:
+    # --- TELA DE LOGIN (ACESSO BLOQUEADO) ---
     st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 2, 1])
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    
     with col2:
-        st.title("🔐 Portal Financeiro")
-        st.info("Acesso restrito ao módulo de Conciliação Cielo.")
-        st.button("🚀 ENTRAR NO SISTEMA", on_click=entrar_no_sistema, use_container_width=True)
-        st.divider()
-        st.caption("Acesso seguro | Versão 20/20")
+        st.title("🔐 Acesso Restrito")
+        st.write("Digite sua senha para desbloquear os módulos de conferência.")
+        
+        senha_input = st.text_input("Senha do Sistema", type="password")
+        
+        if st.button("🔓 ENTRAR E DESBLOQUEAR", use_container_width=True):
+            realizar_login(senha_input)
+            if st.session_state.autenticado:
+                st.rerun()
 
 else:
-    # --- TELA DO SISTEMA (DENTRO) ---
+    # --- TELA DO SISTEMA DESBLOQUEADA ---
     
-    # Barra lateral sempre visível para sair
+    # Barra lateral com botão de saída
     with st.sidebar:
-        st.header("👤 Menu de Acesso")
-        st.write("Status: **Online**")
-        st.button("🚪 SAIR E FECHAR MÓDULO", on_click=sair_do_sistema, use_container_width=True)
+        st.header("👤 Gestor Ativo")
+        st.write("Módulo: **Cielo 20/20**")
         st.divider()
-        st.caption("Ao sair, todos os arquivos temporários serão apagados.")
+        if st.button("🚪 SAIR E BLOQUEAR TUDO", use_container_width=True):
+            realizar_logout()
+        st.divider()
+        st.caption("Ao sair, os módulos são bloqueados e os dados limpos.")
 
-    # Conteúdo Principal
-    st.title("💳 Conciliador de Recebíveis")
-    st.markdown("Carregue os arquivos abaixo para realizar a varredura.")
+    # Área de Trabalho
+    st.title("💳 Conciliador de Recebíveis Cielo")
+    st.info("Todos os módulos estão desbloqueados. Carregue os arquivos abaixo.")
 
     c1, c2 = st.columns(2)
     with c1:
-        u_excel = st.file_uploader("📂 Selecione a Planilha Cielo", type=['xlsx'])
+        u_excel = st.file_uploader("📂 Planilha Cielo Original", type=['xlsx'])
     with c2:
-        u_pdf = st.file_uploader("📄 Selecione o PDF do Sistema", type=['pdf'])
+        u_pdf = st.file_uploader("📄 PDF do Sistema", type=['pdf'])
 
     if u_excel and u_pdf:
-        # Lógica de extração ultra-precisa (IDs com hífen e quebra de linha)
+        # Lógica de extração que resolve os IDs complexos (ex: PC22630-1)
         @st.cache_data
-        def extrair_dados_pdf(file):
+        def extrair_pdf_ninja(file):
             dados = []
-            id_atual = None
+            id_temp = None
             with pdfplumber.open(file) as pdf:
                 for page in pdf.pages:
                     texto = page.extract_text()
                     if texto:
                         for linha in texto.split('\n'):
+                            # Captura IDs com símbolos e hífens
                             id_m = re.search(r'(PC|PD)[\w\d\-\.]+', linha, re.IGNORECASE)
                             if id_m:
-                                id_atual = id_m.group().strip().upper()
+                                id_temp = id_m.group().strip().upper()
                             
+                            # Captura valores mesmo com quebra de linha no PDF
                             valores = re.findall(r'\d+(?:[\.,]\d{2})', linha)
-                            if valores and id_atual:
+                            if valores and id_temp:
                                 for v in valores:
                                     try:
                                         v_f = float(v.replace('.', '').replace(',', '.'))
                                         if v_f > 1.0:
-                                            dados.append({'id': id_atual, 'valor': v_f, 'usado': False})
-                                            id_atual = None
+                                            dados.append({'id': id_temp, 'valor': v_f, 'usado': False})
+                                            id_temp = None
                                     except: continue
             return dados
 
-        if st.button("🔍 INICIAR CONFERÊNCIA TOTAL"):
+        if st.button("🚀 PROCESSAR 20 ITENS AGORA"):
             try:
-                lista_pdf = extrair_dados_pdf(u_pdf)
+                lista_pdf = extrair_pdf_ninja(u_pdf)
                 u_excel.seek(0)
                 wb = openpyxl.load_workbook(u_excel, data_only=False)
                 ws = wb.active
-                
-                # Header na linha 15 (Index 14)
                 df_dados = pd.read_excel(u_excel, header=14)
                 
-                acertos = 0
+                contador = 0
                 for i in range(len(df_dados)):
                     linha_ws = i + 16
                     try:
-                        v_alvo = float(df_dados.iloc[i, 4]) # Valor Bruto
+                        v_alvo = float(df_dados.iloc[i, 4]) # Coluna E
                         for item in lista_pdf:
                             if not item['usado'] and abs(item['valor'] - v_alvo) <= 0.01:
-                                ws.cell(row=linha_ws, column=8).value = item['id']
-                                item['usado'] = True
-                                acertos += 1
-                                break
-                    except: continue
-
-                st.success(f"✅ Finalizado! {acertos} de 20 itens localizados.")
-                
-                # Botão de Download
-                out = BytesIO()
-                wb.save(out)
-                st.download_button("📥 BAIXAR PLANILHA PRONTA", out.getvalue(), "Cielo_Finalizada.xlsx", use_container_width=True)
-            
-            except Exception as e:
-                st.error(f"Erro no processamento: {e}")
+                                ws.
