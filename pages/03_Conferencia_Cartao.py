@@ -5,77 +5,88 @@ from io import BytesIO
 import openpyxl
 import re
 
-st.set_page_config(page_title="Cielo 20/20 Final", layout="wide")
-st.title("💳 Conferência Cielo - Sistema de Alta Precisão")
+st.set_page_config(page_title="Cielo 20/20", layout="wide")
 
-u_excel = st.file_uploader("1. Planilha Cielo Original", type=['xlsx'])
-u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
+# Título e Botão de Reiniciar (Sair) sempre visíveis
+col_t, col_r = st.columns([4, 1])
+with col_t:
+    st.title("💳 Conferência Cielo - Sistema Estável")
+with col_r:
+    if st.button("♻️ Reiniciar Sistema"):
+        st.rerun()
+
+st.markdown("---")
+
+u_excel = st.file_uploader("1. Selecione a Planilha Cielo", type=['xlsx'])
+u_pdf = st.file_uploader("2. Selecione o PDF do Sistema", type=['pdf'])
 
 if u_excel and u_pdf:
+    # --- EXTRAÇÃO DO PDF (MEMÓRIA DE LINHA) ---
     @st.cache_data
-    def extrair_pdf_v4(file):
+    def extrair_pdf_blindado(file):
         dados = []
-        id_recente = None
+        id_temp = None
         with pdfplumber.open(file) as pdf:
             for page in pdf.pages:
                 texto = page.extract_text()
                 if texto:
                     for linha in texto.split('\n'):
-                        # Identifica PC/PD com hífens (ex: PC22630-1)
+                        # Captura PC/PD completo (ex: PC22630-1)
                         id_m = re.search(r'(PC|PD)[\w\d\-\.]+', linha, re.IGNORECASE)
                         if id_m:
-                            id_recente = id_m.group().strip().upper()
+                            id_temp = id_m.group().strip().upper()
                         
-                        # Busca valores na linha atual
+                        # Captura valores na mesma linha ou na seguinte
                         valores = re.findall(r'\d+(?:[\.,]\d{2})', linha)
-                        if valores and id_recente:
+                        if valores and id_temp:
                             for v in valores:
                                 try:
                                     v_f = float(v.replace('.', '').replace(',', '.'))
                                     if v_f > 1.0:
-                                        dados.append({'id': id_recente, 'valor': v_f, 'usado': False})
-                                        id_recente = None # Reset após vincular
+                                        dados.append({'id': id_temp, 'valor': v_f, 'usado': False})
+                                        id_temp = None
                                 except: continue
         return dados
 
-    lista_pdf = extrair_pdf_v4(u_pdf)
+    lista_pdf = extrair_pdf_blindado(u_pdf)
 
-    if st.button("🚀 Gerar Planilha 20/20"):
-        u_excel.seek(0)
-        wb = openpyxl.load_workbook(u_excel, data_only=False)
-        ws = wb.active
-        
-        # Lemos os dados começando da linha 16 (Header na 15)
-        # Usamos try/except para evitar o erro de Index que você recebeu
+    # --- BOTÃO DE PROCESSAR (ENTRAR) ---
+    if st.button("🚀 Iniciar Conciliação Total"):
         try:
+            u_excel.seek(0)
+            wb = openpyxl.load_workbook(u_excel, data_only=False)
+            ws = wb.active
+            
+            # Carrega dados ignorando o erro de índice
             df_dados = pd.read_excel(u_excel, header=14)
             
             sucessos = 0
+            # Percorre apenas as linhas que existem de fato
             for i in range(len(df_dados)):
-                linha_planilha = i + 16
+                linha_excel = i + 16
                 try:
-                    # Pegamos o valor bruto (Coluna E / Índice 4)
-                    valor_cielo = float(df_dados.iloc[i, 4])
+                    # Valor Bruto está na Coluna E (índice 4)
+                    val_cielo = float(df_dados.iloc[i, 4])
                     
                     for item in lista_pdf:
-                        if not item['usado'] and abs(item['valor'] - valor_cielo) <= 0.01:
-                            # Escreve na Coluna H (8)
-                            ws.cell(row=linha_planilha, column=8).value = item['id']
+                        if not item['usado'] and abs(item['valor'] - val_cielo) <= 0.01:
+                            ws.cell(row=linha_excel, column=8).value = item['id']
                             item['usado'] = True
                             sucessos += 1
                             break
-                except Exception:
-                    continue
+                except: continue
 
-            st.success(f"✅ Finalizado! {sucessos} de 20 itens vinculados.")
+            st.success(f"✅ Sucesso! {sucessos} de 20 itens localizados.")
             
+            # --- ÁREA DE DOWNLOAD ---
             output = BytesIO()
             wb.save(output)
             st.download_button(
-                label="📥 Baixar Planilha Idêntica",
+                label="📥 Baixar Planilha 20/20",
                 data=output.getvalue(),
-                file_name="Cielo_20_de_20.xlsx",
+                file_name="Cielo_Conciliado_Final.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
         except Exception as e:
-            st.error(f"Erro na estrutura da planilha: {e}. Verifique se a tabela começa na linha 16.")
+            st.error(f"Ocorreu um erro técnico: {e}. Certifique-se de que a planilha é a original da Cielo.")
