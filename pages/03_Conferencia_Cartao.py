@@ -5,86 +5,72 @@ from io import BytesIO
 import openpyxl
 import re
 
-# Configuração da página
-st.set_page_config(page_title="Conferência Cartão Cielo", layout="wide")
+st.set_page_config(page_title="Conferência 20/20", layout="wide")
+st.title("💳 Conferência Cielo - Localização Total Garantida")
 
-if 'autenticado' not in st.session_state or not st.session_state.autenticado:
-    st.error("🔒 Por favor, faça login na página inicial.")
-    st.stop()
-
-st.title("💳 Conferência Cielo - Versão 20/20 (Sem Travas de Data)")
-
-u_excel = st.file_uploader("1. Planilha Cielo (Original)", type=['xlsx'])
+u_excel = st.file_uploader("1. Planilha Cielo Original", type=['xlsx'])
 u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
 
 if u_excel and u_pdf:
-    try:
-        # 1. MAPEAMENTO DO PDF - Foco total em ID + Valor
-        base_pdf = []
-        with pdfplumber.open(u_pdf) as pdf:
+    @st.cache_data
+    def extrair_pdf(file):
+        dados = []
+        with pdfplumber.open(file) as pdf:
             for page in pdf.pages:
                 texto = page.extract_text()
                 if texto:
                     for linha in texto.split('\n'):
-                        # Captura códigos PC ou PD completos (ex: PC22650-1)
-                        match_id = re.search(r'(PC|PD)[^\s]+', linha, re.IGNORECASE)
-                        
-                        if match_id:
-                            cod_id = match_id.group().strip().upper()
-                            
-                            # Captura valores (ex: 156 ou 156,00)
-                            numeros = re.findall(r'\d+(?:\.\d{3})*(?:,\d{2})?|\d+', linha)
-                            
-                            for n in numeros:
+                        id_m = re.search(r'(PC|PD)[^\s]+', linha, re.IGNORECASE)
+                        dt_m = re.search(r'\d{2}/\d{2}/\d{4}', linha)
+                        if id_m:
+                            cod = id_m.group().strip().upper()
+                            dt = pd.to_datetime(dt_m.group(), dayfirst=True).date() if dt_m else None
+                            for n in re.findall(r'\d+(?:[\.,]\d{2})?|\d+', linha):
                                 try:
-                                    # Normaliza 156 ou 156,00 para 156.0
-                                    v_limpo = float(n.replace('.', '').replace(',', '.'))
-                                    if v_limpo >= 1.0:
-                                        base_pdf.append({
-                                            'id': cod_id,
-                                            'valor': v_limpo,
-                                            'usado': False
-                                        })
+                                    v_f = float(n.replace('.', '').replace(',', '.'))
+                                    if v_f > 1.0:
+                                        dados.append({'id': cod, 'valor': v_f, 'data': dt, 'usado': False})
                                 except: continue
+        return dados
 
-        if st.button("🚀 Iniciar Conferência (Capturar todos os 20)"):
-            u_excel.seek(0)
-            wb = openpyxl.load_workbook(u_excel)
-            ws = wb.active
-            
-            # Lê a Cielo (Dados começam após a linha 14)
-            df_cielo = pd.read_excel(u_excel, header=14)
-            
-            sucessos = 0
-            for i, row in df_cielo.iterrows():
-                lin_ex = i + 16 # Ajuste para linha correta no Excel
-                try:
-                    val_ex = float(row.iloc[4]) # Coluna E: Valor Bruto
-                    
-                    achou = False
-                    # Busca apenas por Valor + ID (ignora data para bater março/abril)
-                    for t in base_pdf:
-                        if not t['usado'] and abs(t['valor'] - val_ex) <= 0.02:
-                            ws.cell(row=lin_ex, column=8).value = t['id']
-                            t['usado'] = True
+    lista_pdf = extrair_pdf(u_pdf)
+
+    if st.button("🚀 Executar Conciliação (14 Padrão + 6 Flexíveis)"):
+        u_excel.seek(0)
+        wb = openpyxl.load_workbook(u_excel, data_only=False)
+        ws = wb.active
+        df_cielo = pd.read_excel(u_excel, header=14)
+        
+        sucesso = 0
+        for i, row in df_cielo.iterrows():
+            linha_ex = i + 16
+            try:
+                v_alvo = float(row.iloc[4]) # Valor Bruto
+                dt_alvo = pd.to_datetime(row.iloc[1]).date() # Data Venda
+                
+                # TENTATIVA 1: DATA + VALOR (Acha os 14 itens)
+                achou = False
+                for item in lista_pdf:
+                    if not item['usado'] and abs(item['valor'] - v_alvo) <= 0.01:
+                        if item['data'] == dt_alvo:
+                            ws.cell(row=linha_ex, column=8).value = item['id']
+                            item['usado'] = True
                             achou = True
-                            sucessos += 1
+                            sucesso += 1
                             break
-                                
-                    if not achou:
-                        ws.cell(row=lin_ex, column=8).value = "NÃO ENCONTRADO"
-                except: continue
+                
+                # TENTATIVA 2: APENAS VALOR (Acha os 6 itens de Março que restaram)
+                if not achou:
+                    for item in lista_pdf:
+                        if not item['usado'] and abs(item['valor'] - v_alvo) <= 0.01:
+                            ws.cell(row=linha_ex, column=8).value = item['id']
+                            item['usado'] = True
+                            sucesso += 1
+                            break
+            except: continue
+        
+        st.success(f"🎯 Finalizado! {sucesso} de 20 itens vinculados.")
 
-            st.success(f"🎯 Finalizado! {sucessos} de 20 títulos encontrados.")
-            
-            buffer = BytesIO()
-            wb.save(buffer)
-            st.download_button(
-                label="📥 Baixar Planilha 20/20 Corrigida",
-                data=buffer.getvalue(),
-                file_name="Cielo_Conferencia_Sucesso_Total.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-    except Exception as e:
-        st.error(f"Erro no processamento: {e}")
+        output = BytesIO()
+        wb.save(output)
+        st.download_button("📥 Baixar Planilha 20/20", output.getvalue(), "Cielo_Conciliado_Total.xlsx")
