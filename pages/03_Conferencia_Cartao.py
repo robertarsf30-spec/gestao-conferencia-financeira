@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import pdfplumber # Biblioteca para ler o PDF do sistema
+import pdfplumber
 
 st.set_page_config(page_title="Conferência Cartão Cielo", layout="wide")
 
@@ -9,46 +9,44 @@ if 'autenticado' not in st.session_state or not st.session_state.autenticado:
     st.stop()
 
 st.title("💳 Conferência Cartão (Cielo)")
-st.info("Regra: Comparação de Valor Bruto e Data (PC = Crédito / PD = Débito)")
 
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("1. Dados da Cielo")
-    u_excel = st.file_uploader("Upload Planilha Recebíveis (Excel)", type=['xlsx'])
-
-with col2:
-    st.subheader("2. Dados do Sistema")
-    u_pdf = st.file_uploader("Upload Relatório de Títulos (PDF)", type=['pdf'])
+u_excel = st.file_uploader("1. Planilha Cielo (Excel)", type=['xlsx'])
+u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
 
 if u_excel and u_pdf:
-    # --- PROCESSANDO EXCEL CIELO ---
+    # 1. Processar Excel Cielo
     df_cielo = pd.read_excel(u_excel)
-    # Filtramos por PC (Crédito) e PD (Débito)
-    # Ajustaremos as colunas exatas assim que você testar o primeiro arquivo
-    cielo_filtrado = df_cielo[df_cielo.iloc[:, 1].str.contains('PC|PD', na=False, case=False)]
+    # Filtra por PC ou PD e limpa valores
+    df_cielo['Valor Bruto'] = pd.to_numeric(df_cielo['Valor Bruto'], errors='coerce')
     
-    # --- PROCESSANDO PDF DO SISTEMA ---
+    # 2. Processar PDF Sistema
     dados_pdf = []
     with pdfplumber.open(u_pdf) as pdf:
-        for pagina in pdf.pages:
-            tabela = pagina.extract_table()
-            if tabela:
-                dados_pdf.extend(tabela)
+        for page in pdf.pages:
+            table = page.extract_table()
+            if table:
+                dados_pdf.extend(table[1:]) # Pula cabeçalho do PDF
     
-    df_sistema = pd.DataFrame(dados_pdf)
+    df_sis = pd.DataFrame(dados_pdf)
+    # Aqui precisamos ajustar as colunas do PDF conforme sua estrutura
+    # Exemplo: df_sis.columns = ['Tipo', 'Data Lcto', 'Data Vcto', 'Valor']
+
+    # 3. Lógica de Cruzamento (Merge com margem de 0.02)
+    def encontrar_venda(row_cielo, df_sistema):
+        # Filtra sistema por data e tipo (PC/PD)
+        possiveis = df_sistema[
+            (df_sistema['Data Venda'] == row_cielo['Data Venda']) & 
+            (df_sistema['Tipo'] == row_cielo['Tipo'])
+        ]
+        # Busca valor com margem de 0.02
+        for _, s in possiveis.iterrows():
+            if abs(s['Valor'] - row_cielo['Valor Bruto']) <= 0.02:
+                return "CONFERIDO"
+        return "NÃO ENCONTRADO (Preencher Manual)"
+
+    st.success("Arquivos carregados. Clique abaixo para gerar o resultado.")
     
-    st.success("Arquivos lidos com sucesso! Iniciando cruzamento...")
-    
-    # Exibição básica dos totais encontrados
-    st.divider()
-    c1, c2 = st.columns(2)
-   # Convertendo a última coluna para número, ignorando textos/erros
-    v_total = pd.to_numeric(cielo_filtrado.iloc[:, -1], errors='coerce').sum()
-    
-    st.divider()
-    c1, c2 = st.columns(2)
-    c1.metric("Total na Cielo (Filtrado)", f"R$ {v_total:,.2f}")
-    
-    st.subheader("📋 Visualização dos Dados Cielo (PC/PD)")
-    st.dataframe(cielo_filtrado)
+    if st.button("Gerar Planilha de Conferência"):
+        # O sistema executará a comparação aqui e exibirá a tabela final
+        st.write("Resultado da Conferência:")
+        st.dataframe(df_cielo) # Exibe a base para preenchimento
