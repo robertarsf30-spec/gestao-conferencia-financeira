@@ -10,67 +10,63 @@ if 'autenticado' not in st.session_state or not st.session_state.autenticado:
     st.stop()
 
 st.title("💳 Conferência Cartão (Cielo)")
-st.divider()
 
 u_excel = st.file_uploader("1. Planilha Cielo (Excel)", type=['xlsx'])
 u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
 
 if u_excel and u_pdf:
     try:
-        # 1. PROCESSAR EXCEL CIELO
-        # Pula as 14 linhas iniciais para chegar no cabeçalho correto
+        # 1. PROCESSAR EXCEL CIELO (Pula as 14 linhas de cabeçalho)
         df_cielo = pd.read_excel(u_excel, header=14) 
         
-        # Identificação por POSIÇÃO para evitar erro de nome de coluna
-        # Coluna 1: Data Venda | Coluna 2: Forma Pagamento | Coluna 4: Valor Bruto
-        # (Ajustado conforme o padrão do seu arquivo CSV)
+        # Identificação por posição conforme seu exemplo
+        # Col 1: Data Venda | Col 2: Forma Pagamento | Col 4: Valor Bruto
         df_cielo['Data_Venda'] = pd.to_datetime(df_cielo.iloc[:, 1], dayfirst=True, errors='coerce').dt.date
-        df_cielo['Tipo_Original'] = df_cielo.iloc[:, 2].astype(str)
-        df_cielo['Valor_Num'] = pd.to_numeric(df_cielo.iloc[:, 4], errors='coerce')
+        df_cielo['Tipo_Cielo'] = df_cielo.iloc[:, 2].astype(str)
+        df_cielo['Valor_Cielo'] = pd.to_numeric(df_cielo.iloc[:, 4], errors='coerce')
 
-        # Limpeza de linhas vazias
-        df_cielo = df_cielo.dropna(subset=['Data_Venda', 'Valor_Num'])
-        
-        if 'Descrição' not in df_cielo.columns:
-            df_cielo['Descrição'] = ""
-
-        # 2. PROCESSAR PDF DO SISTEMA
+        # 2. PROCESSAR PDF DO SISTEMA (Baseado no seu print e exemplo)
         dados_pdf = []
         with pdfplumber.open(u_pdf) as pdf:
             for page in pdf.pages:
-                table = page.extract_table()
-                if table:
-                    for row in table:
-                        try:
-                            # Tenta converter valor (última col) e data (terceira col)
-                            v_str = str(row[-1]).replace('.', '').replace(',', '.')
-                            valor_pdf = float(v_str)
-                            data_pdf = pd.to_datetime(row[2], dayfirst=True).date()
-                            dados_pdf.append({'Tipo': str(row[0]), 'Data': data_pdf, 'Valor': valor_pdf})
-                        except:
-                            continue
+                text = page.extract_text()
+                if text:
+                    for line in text.split('\n'):
+                        parts = line.split()
+                        if len(parts) >= 8: # Linhas com dados financeiros
+                            try:
+                                # Pega o código (PC/PD) no início e o valor na penúltima posição
+                                tipo_pdf = parts[0] 
+                                data_pdf = pd.to_datetime(parts[1], dayfirst=True).date()
+                                valor_pdf = float(parts[-3].replace('.', '').replace(',', '.'))
+                                dados_pdf.append({'Tipo': tipo_pdf, 'Data': data_pdf, 'Valor': valor_pdf})
+                            except:
+                                continue
         
         df_sis = pd.DataFrame(dados_pdf)
 
-        # 3. BOTÃO DE AÇÃO
         if st.button("🚀 Iniciar Conferência"):
             def conferir(row):
-                if df_sis.empty: return "PDF SEM DADOS"
+                if df_sis.empty: return "PDF NÃO LIDO"
                 
-                # Regra: Mesma Data (ou D+1), Tipo (PC/PD) e Valor (margem 0.02)
-                # Filtramos se o tipo no PDF contém parte do texto da Cielo (ex: Crédito)
-                cond_data = (df_sis['Data'] - row['Data_Venda']).map(lambda x: abs(x.days) <= 1)
-                cond_valor = (df_sis['Valor'] - row['Valor_Num']).abs() <= 0.02
+                # Regra: Mesma Data, Tipo (PC/PD) e Valor (margem 0.02)
+                # PC = Crédito | PD = Débito
+                match = df_sis[
+                    (df_sis['Tipo'].str.contains('PC|PD', case=False, na=False)) &
+                    (df_sis['Data'] == row['Data_Venda']) &
+                    (abs(df_sis['Valor'] - row['Valor_Cielo']) <= 0.02)
+                ]
                 
-                match = df_sis[cond_data & cond_valor]
-                return "CONFERIDO" if not match.empty else "NÃO ENCONTRADO NO SISTEMA"
+                if not match.empty:
+                    return f"CONFERIDO ({match.iloc[0]['Tipo']})"
+                return "NÃO ENCONTRADO NO SISTEMA"
 
             df_cielo['Descrição'] = df_cielo.apply(conferir, axis=1)
             
-            # Remove colunas auxiliares antes de exibir
-            df_final = df_cielo.drop(columns=['Data_Venda', 'Tipo_Original', 'Valor_Num'])
+            # Limpeza das colunas extras antes de mostrar
+            df_final = df_cielo.drop(columns=['Data_Venda', 'Tipo_Cielo', 'Valor_Cielo'])
             
-            st.success("✅ Processamento concluído!")
+            st.success("✅ Conferência concluída!")
             st.dataframe(df_final)
 
             # 4. DOWNLOAD
@@ -81,7 +77,7 @@ if u_excel and u_pdf:
             st.download_button(
                 label="📥 Baixar Planilha Finalizada",
                 data=output.getvalue(),
-                file_name="conferencia_cielo_pronta.xlsx",
+                file_name="conferencia_finalizada.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
