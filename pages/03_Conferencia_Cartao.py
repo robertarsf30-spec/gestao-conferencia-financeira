@@ -3,6 +3,7 @@ import pandas as pd
 import pdfplumber
 from io import BytesIO
 import openpyxl
+import re
 
 st.set_page_config(page_title="Conferência Cartão Cielo", layout="wide")
 
@@ -25,54 +26,58 @@ if u_excel and u_pdf:
                 if texto:
                     for linha in texto.split('\n'):
                         partes = linha.split()
-                        if len(partes) >= 8:
+                        # Procuramos o padrão PC ou PD no início da linha
+                        if len(partes) >= 6 and re.match(r'^(PC|PD)', partes[0]):
                             try:
-                                p_tipo = str(partes[0])
-                                p_data = pd.to_datetime(partes[1], dayfirst=True).date()
-                                # Valor bruto na penúltima posição do PDF
-                                v_limpo = partes[-3].replace('.', '').replace(',', '.')
-                                p_valor = float(v_limpo)
-                                dados_pdf.append({'tipo': p_tipo, 'data': p_data, 'valor': p_valor})
+                                t_codigo = partes[0] # Ex: PC22650-1
+                                t_data = pd.to_datetime(partes[1], dayfirst=True).date()
+                                # O valor bruto no seu PDF é o penúltimo ou antepenúltimo
+                                # Vamos converter o valor que aparece antes de "cielo" ou similar
+                                val_str = partes[-3].replace('.', '').replace(',', '.')
+                                t_valor = float(val_str)
+                                
+                                dados_pdf.append({'codigo': t_codigo, 'data': t_data, 'valor': t_valor})
                             except:
                                 continue
+        
         df_pdf = pd.DataFrame(dados_pdf)
 
         if st.button("🚀 Iniciar Conferência"):
-            # 2. CARREGAR EXCEL ORIGINAL PARA EDITAR APENAS A COLUNA H
+            # 2. CARREGAR EXCEL ORIGINAL
             u_excel.seek(0)
             wb = openpyxl.load_workbook(u_excel)
             ws = wb.active
             
-            # Lendo dados para lógica (pula as 14 linhas de cabeçalho)
+            # Lê dados para conferência (pula as 14 linhas de topo)
             df_cielo = pd.read_excel(u_excel, header=14)
             
-            sucessos = 0
-            # Percorre a planilha (começando da linha 16 no Excel)
+            conferidos = 0
+            # Percorre o Excel (dados começam na linha 16)
             for i, row in df_cielo.iterrows():
                 linha_excel = i + 16
                 
                 try:
-                    # Posições: Data Venda (Col 2) | Valor Bruto (Col 5)
+                    # Coluna 2 (B) é Data | Coluna 5 (E) é Valor Bruto
                     data_c = pd.to_datetime(row.iloc[1], dayfirst=True).date()
                     valor_c = float(row.iloc[4])
                     
-                    encontrado = False
+                    achou = False
                     if not df_pdf.empty:
-                        for _, pdf_row in df_pdf.iterrows():
-                            # Regra: Mesma data e diferença de valor <= 0.02
-                            if pdf_row['data'] == data_c and abs(pdf_row['valor'] - valor_c) <= 0.02:
-                                ws.cell(row=linha_excel, column=8).value = f"CONFERIDO ({pdf_row['tipo']})"
-                                encontrado = True
-                                sucessos += 1
+                        # Filtra PDF por data e valor (margem 0.05 para garantir)
+                        for _, p in df_pdf.iterrows():
+                            if p['data'] == data_c and abs(p['valor'] - valor_c) <= 0.05:
+                                ws.cell(row=linha_excel, column=8).value = f"CONFERIDO ({p['codigo']})"
+                                achou = True
+                                conferidos += 1
                                 break
                     
-                    if not encontrado:
+                    if not achou:
                         ws.cell(row=linha_excel, column=8).value = "NÃO ENCONTRADO"
                 except:
                     continue
 
-            # 3. DOWNLOAD
-            st.success(f"✅ Conferência concluída! {sucessos} itens encontrados.")
+            # 3. RESULTADO E DOWNLOAD
+            st.success(f"✅ Finalizado! {conferidos} títulos encontrados e marcados.")
             
             output = BytesIO()
             wb.save(output)
@@ -80,7 +85,7 @@ if u_excel and u_pdf:
             st.download_button(
                 label="📥 Baixar Planilha Original Preenchida",
                 data=output.getvalue(),
-                file_name="Cielo_Conferida_Original.xlsx",
+                file_name="Cielo_Conferida_Final.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
