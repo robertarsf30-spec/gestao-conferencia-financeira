@@ -18,16 +18,18 @@ u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
 if u_excel and u_pdf:
     try:
         # 1. PROCESSAR EXCEL CIELO
-        # O arquivo da Cielo tem 13 linhas de cabeçalho antes dos dados
+        # O cabeçalho real da Cielo começa na linha 14 (índice 13)
         df_cielo = pd.read_excel(u_excel, header=13) 
         
-        # Mapeamento das colunas conforme seu arquivo
+        # Mapeamento das colunas do seu arquivo Cielo
         col_tipo = 'Forma de pagamento'
         col_data = 'Data da venda'
         col_valor = 'Valor bruto'
 
-        # Limpeza básica
-        df_cielo = df_cielo.dropna(subset=[col_data])
+        # Limpeza de dados nulos nas colunas essenciais
+        df_cielo = df_cielo.dropna(subset=[col_data, col_valor])
+        
+        # Conversão para garantir cálculos corretos
         df_cielo['Valor_Num'] = pd.to_numeric(df_cielo[col_valor], errors='coerce')
         df_cielo['Data_Venda'] = pd.to_datetime(df_cielo[col_data], dayfirst=True, errors='coerce').dt.date
         
@@ -55,24 +57,24 @@ if u_excel and u_pdf:
         # 3. BOTÃO DE AÇÃO
         if st.button("🚀 Iniciar Conferência"):
             if df_sis.empty:
-                st.warning("⚠️ Não conseguimos ler dados do PDF. Verifique se o formato é o correto.")
+                st.warning("⚠️ Não foi possível extrair dados do PDF. Verifique o formato.")
             
             def conferir(row):
                 # Regra: Mesma Data (ou D+1), Tipo (PC/PD) e Valor (margem 0.02)
                 # PC = Crédito | PD = Débito
-                match = df_sis[
-                    (df_sis['Tipo'].str.contains('PC|PD', case=False, na=False)) &
-                    (abs((df_sis['Data'] - row['Data_Venda']).days) <= 1) &
-                    (abs(df_sis['Valor'] - row['Valor_Num']) <= 0.02)
-                ]
-                return "CONFERIDO" if not match.empty else "NÃO ENCONTRADO NO SISTEMA"
+                condicao_tipo = df_sis['Tipo'].str.contains('PC|PD', case=False, na=False)
+                condicao_data = (df_sis['Data'] - row['Data_Venda']).map(lambda x: abs(x.days) <= 1)
+                condicao_valor = (df_sis['Valor'] - row['Valor_Num']).abs() <= 0.02
+                
+                match = df_sis[condicao_tipo & condicao_data & condicao_valor]
+                return "CONFERIDO" if not match.empty else "NÃO ENCONTRADO"
 
             df_cielo['Descrição'] = df_cielo.apply(conferir, axis=1)
             
-            # Limpeza final para exibição e download
+            # Limpeza final para exibição
             df_final = df_cielo.drop(columns=['Valor_Num', 'Data_Venda'])
             
-            st.success("✅ Conferência concluída com sucesso!")
+            st.success("✅ Conferência concluída!")
             st.dataframe(df_final)
 
             # 4. DOWNLOAD
@@ -81,7 +83,7 @@ if u_excel and u_pdf:
                 df_final.to_excel(writer, index=False)
             
             st.download_button(
-                label="📥 Baixar Planilha de Conferência (Excel)",
+                label="📥 Baixar Planilha de Conferência",
                 data=output.getvalue(),
                 file_name="conferencia_finalizada.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
