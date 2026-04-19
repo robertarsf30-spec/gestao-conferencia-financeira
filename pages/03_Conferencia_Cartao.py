@@ -43,5 +43,12 @@ if u_excel and u_pdf:
     # Exibição básica dos totais encontrados
     st.divider()
     c1, c2 = st.columns(2)
-    c1.metric("Total na Cielo", f"R$ {cielo_filtrado.iloc[:, -1].sum():,.2f}")
-    st.dataframe(cielo_filtrado.head())
+   # Convertendo a última coluna para número, ignorando textos/erros
+    v_total = pd.to_numeric(cielo_filtrado.iloc[:, -1], errors='coerce').sum()
+    
+    st.divider()
+    c1, c2 = st.columns(2)
+    c1.metric("Total na Cielo (Filtrado)", f"R$ {v_total:,.2f}")
+    
+    st.subheader("📋 Visualização dos Dados Cielo (PC/PD)")
+    st.dataframe(cielo_filtrado)
