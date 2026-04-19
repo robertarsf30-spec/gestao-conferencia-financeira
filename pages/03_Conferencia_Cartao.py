@@ -17,76 +17,74 @@ u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
 
 if u_excel and u_pdf:
     try:
-        # 1. LER DADOS DO EXCEL PARA PROCESSAMENTO
-        # Pula as 14 linhas de cabeçalho da Cielo
-        df_dados = pd.read_excel(u_excel, header=14)
-        
-        # Mapeamento por posição (Col 1: Data Venda | Col 4: Valor Bruto)
-        df_dados['Data_Ref'] = pd.to_datetime(df_dados.iloc[:, 1], dayfirst=True, errors='coerce').dt.date
-        df_dados['Valor_Ref'] = pd.to_numeric(df_dados.iloc[:, 4], errors='coerce')
-
-        # 2. PROCESSAR PDF DO SISTEMA
+        # 1. EXTRAÇÃO DE DADOS DO PDF
         dados_pdf = []
         with pdfplumber.open(u_pdf) as pdf:
             for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    for line in text.split('\n'):
-                        parts = line.split()
-                        # Procura linhas com o formato do seu sistema (PC... data valor)
-                        if len(parts) >= 8:
+                texto = page.extract_text()
+                if texto:
+                    for linha in texto.split('\n'):
+                        partes = linha.split()
+                        if len(partes) >= 8:
                             try:
-                                tipo_pdf = str(parts[0])
-                                data_pdf = pd.to_datetime(parts[1], dayfirst=True).date()
-                                # Valor na antepenúltima posição (Ex: 156,00)
-                                val_str = parts[-3].replace('.', '').replace(',', '.')
-                                valor_pdf = float(val_str)
-                                dados_pdf.append({'Tipo': tipo_pdf, 'Data': data_pdf, 'Valor': valor_pdf})
+                                # Tipo (PC/PD), Data (2ª col) e Valor (antepenúltima)
+                                p_tipo = str(partes[0])
+                                p_data = pd.to_datetime(partes[1], dayfirst=True).date()
+                                p_valor = float(partes[-3].replace('.', '').replace(',', '.'))
+                                dados_pdf.append({'tipo': p_tipo, 'data': p_data, 'valor': p_valor})
                             except:
                                 continue
-        
-        df_sis = pd.DataFrame(dados_pdf)
+        df_pdf = pd.DataFrame(dados_pdf)
 
         if st.button("🚀 Iniciar Conferência"):
-            # Abre o Excel original para preencher a coluna Descrição (H)
+            # 2. CARREGAR EXCEL ORIGINAL PARA EDIÇÃO
             u_excel.seek(0)
             wb = openpyxl.load_workbook(u_excel)
-            ws = wb.active 
+            ws = wb.active
+            
+            # Lendo dados para lógica (pula as 14 linhas de cabeçalho)
+            df_cielo = pd.read_excel(u_excel, header=14)
             
             sucessos = 0
-            # Os dados começam na linha 16 do Excel (15 do header + 1)
-            for i, row in df_dados.iterrows():
-                if pd.isna(row['Data_Ref']):
+            # Percorre a planilha linha por linha (começando da linha 16 no Excel)
+            for i, row in df_cielo.iterrows():
+                linha_atual = i + 16
+                
+                # Extrai Data (Col 2) e Valor (Col 5) por posição
+                try:
+                    data_c = pd.to_datetime(row.iloc[1], dayfirst=True).date()
+                    valor_c = float(row.iloc[4])
+                except:
                     continue
                 
-                # Regra: Mesma Data e Valor com margem de 0.02
-                valor_cielo = row['Valor_Ref']
-                data_cielo = row['Data_Ref']
+                # Procura no PDF
+                encontrado = False
+                if not df_pdf.empty:
+                    for _, pdf_row in df_pdf.iterrows():
+                        # Critério: Mesma data e diferença de valor menor que 0.02
+                        dif_valor = abs(pdf_row['valor'] - valor_c)
+                        if pdf_row['data'] == data_c and dif_valor <= 0.02:
+                            ws.cell(row=linha_atual, column=8).value = f"CONFERIDO ({pdf_row['tipo']})"
+                            encontrado = True
+                            sucessos += 1
+                            break
                 
-                # Filtra o PDF
-                achou = False
-                for _, p in df_sis.iterrows():
-                    if p['Data'] == data_cielo and abs(p['Valor'] - valor_cielo) <= 0.02:
-                        ws.cell(row=i+16, column=8).value = f"CONFERIDO ({p['Tipo']})"
-                        sucessos += 1
-                        achou = True
-                        break
-                
-                if not achou:
-                    ws.cell(row=i+16, column=8).value = "NÃO ENCONTRADO"
+                if not encontrado:
+                    ws.cell(row=linha_atual, column=8).value = "NÃO ENCONTRADO"
 
-            st.success(f"✅ Concluído! {sucessos} vendas conferidas.")
-
-            # 3. GERAR DOWNLOAD DO ARQUIVO MANTENDO O MODELO
+            # 3. FINALIZAÇÃO
+            st.success(f"✅ Conferência finalizada! {sucessos} itens encontrados.")
+            
+            # Gerar arquivo para download mantendo o modelo
             output = BytesIO()
             wb.save(output)
             
             st.download_button(
                 label="📥 Baixar Planilha Original Preenchida",
                 data=output.getvalue(),
-                file_name="Cielo_Conferida.xlsx",
+                file_name="conferencia_cielo_original.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            
+
     except Exception as e:
-        st.error(f"Erro técnico: {e}")
+        st.error(f"Erro ao processar: {e}")
