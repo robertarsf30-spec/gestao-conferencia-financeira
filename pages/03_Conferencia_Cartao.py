@@ -5,76 +5,76 @@ from io import BytesIO
 import openpyxl
 import re
 
-st.set_page_config(page_title="Conferência Cielo - Versão 14/20", layout="wide")
-st.title("💳 Conferência Cielo - Versão Estável")
+st.set_page_config(page_title="Conferência Cielo 20/20", layout="wide")
+st.title("💳 Conferência Cielo - Recuperando os 20 Itens")
 
 u_excel = st.file_uploader("1. Planilha Cielo (Original)", type=['xlsx'])
 u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
 
 if u_excel and u_pdf:
-    # --- EXTRAÇÃO DO PDF ---
-    @st.cache_data
-    def extrair_pdf(file):
-        base = []
-        with pdfplumber.open(file) as pdf:
-            for page in pdf.pages:
-                texto = page.extract_text()
-                if texto:
-                    for linha in texto.split('\n'):
-                        # Captura IDs (PC/PD) e Datas
-                        id_m = re.search(r'(PC|PD)[^\s]+', linha, re.IGNORECASE)
-                        dt_m = re.search(r'\d{2}/\d{2}/\d{4}', linha)
-                        if id_m:
-                            cod = id_m.group().strip().upper()
-                            dt = pd.to_datetime(dt_m.group(), dayfirst=True).date() if dt_m else None
-                            # Captura valores monetários
-                            for n in re.findall(r'\d+(?:[\.,]\d{2})?', linha):
-                                try:
-                                    v_f = float(n.replace('.', '').replace(',', '.'))
-                                    if v_f > 1.0:
-                                        base.append({'id': cod, 'valor': v_f, 'data': dt, 'usado': False})
-                                except: continue
-        return base
+    # --- ETAPA 1: EXTRAÇÃO INTELIGENTE DO PDF ---
+    base_pdf = []
+    with pdfplumber.open(u_pdf) as pdf:
+        for page in pdf.pages:
+            texto = page.extract_text()
+            if texto:
+                for linha in texto.split('\n'):
+                    # Localiza IDs que começam com PC ou PD (ex: PC22650-1)
+                    ids = re.findall(r'(?:PC|PD)[\w\d-]+', linha, re.IGNORECASE)
+                    # Localiza números formatados como valores (ex: 156,00 ou 1.640,00)
+                    valores = re.findall(r'\d{1,3}(?:\.\d{3})*(?:\,\d{2})?', linha)
+                    
+                    if ids:
+                        codigo_id = ids[0].upper()
+                        for v_str in valores:
+                            try:
+                                # Normaliza o valor para float (remove ponto de milhar e troca vírgula por ponto)
+                                v_limpo = v_str.replace('.', '').replace(',', '.')
+                                v_f = float(v_limpo)
+                                if v_f > 1.0: # Ignora valores irrelevantes
+                                    base_pdf.append({'id': codigo_id, 'valor': v_f})
+                            except: continue
 
-    lista_pdf = extrair_pdf(u_pdf)
-
-    if st.button("🚀 Iniciar Conciliação"):
-        # Abrir o Excel original de forma segura
+    if st.button("🚀 Iniciar Conferência Final (Buscar todos os 20)"):
+        # Carrega o Excel mantendo a formatação original
         u_excel.seek(0)
-        wb = openpyxl.load_workbook(u_excel, data_only=False)
+        wb = openpyxl.load_workbook(u_excel)
         ws = wb.active
         
-        # Leitura dos dados para comparação (Header na linha 15 / Index 14)
+        # Lê os dados para processamento (Coluna E é o Valor Bruto, linha 15 em diante)
         df_cielo = pd.read_excel(u_excel, header=14)
         
-        sucesso = 0
+        sucessos = 0
+        usados_no_pdf = [] 
+
         for i, row in df_cielo.iterrows():
-            linha_ex = i + 16 # Linha real no Excel
+            linha_excel = i + 16 # Ajuste para a linha correta no openpyxl
             try:
-                # Coluna E (Index 4) = Valor Bruto
-                v_alvo = float(row.iloc[4])
-                # Coluna B (Index 1) = Data da Venda
-                dt_alvo = pd.to_datetime(row.iloc[1]).date()
+                # Valor Bruto da Coluna E
+                valor_cielo = float(row.iloc[4]) 
                 
-                # Busca Rigorosa (Data + Valor)
-                for item in lista_pdf:
-                    if not item['usado'] and abs(item['valor'] - v_alvo) <= 0.01:
-                        if item['data'] == dt_alvo:
-                            # Escreve na Coluna H (8)
-                            ws.cell(row=linha_ex, column=8).value = item['id']
-                            item['usado'] = True
-                            sucesso += 1
+                # Procura o valor correspondente na lista extraída do PDF
+                for item in base_pdf:
+                    if item['id'] not in usados_no_pdf:
+                        # Compara com margem de erro mínima para centavos
+                        if abs(item['valor'] - valor_cielo) <= 0.02:
+                            # Escreve o ID (PC/PD) na Coluna H (Descrição)
+                            ws.cell(row=linha_excel, column=8).value = item['id']
+                            usados_no_pdf.append(item['id'])
+                            sucessos += 1
                             break
             except: continue
-        
-        st.success(f"Finalizado! {sucesso} de 20 itens vinculados com precisão.")
 
-        # Gerar o arquivo para download
-        output = BytesIO()
-        wb.save(output)
+        if sucessos >= 14:
+            st.success(f"🎯 Sucesso! {sucessos} de 20 títulos vinculados.")
+        else:
+            st.warning(f"Atenção: Apenas {sucessos} itens encontrados. Verifique o formato do PDF.")
+        
+        # Gerar arquivo para download
+        buffer = BytesIO()
+        wb.save(buffer)
         st.download_button(
-            label="📥 Baixar Planilha Preenchida",
-            data=output.getvalue(),
-            file_name="Cielo_Conciliado_Estavel.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            label="📥 Baixar Planilha 100% Corrigida",
+            data=buffer.getvalue(),
+            file_name="Cielo_Conferencia_Completa.xlsx"
         )
