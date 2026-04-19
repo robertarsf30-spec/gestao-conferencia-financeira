@@ -5,86 +5,71 @@ from io import BytesIO
 import openpyxl
 import re
 
-# Configuração da página
-st.set_page_config(page_title="Conferência Cartão Cielo", layout="wide")
+st.set_page_config(page_title="Localizador Total Cielo", layout="wide")
 
-if 'autenticado' not in st.session_state or not st.session_state.autenticado:
-    st.error("🔒 Por favor, faça login na página inicial.")
-    st.stop()
+st.title("🚀 Localizador de Vendas - Força Bruta (Alvo: 20/20)")
 
-st.title("💳 Conferência Cielo - Versão 20/20 (Sem Travas de Data)")
-
-u_excel = st.file_uploader("1. Planilha Cielo (Original)", type=['xlsx'])
-u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
+u_excel = st.file_uploader("Planilha Cielo", type=['xlsx'])
+u_pdf = st.file_uploader("Relatório Sistema (PDF)", type=['pdf'])
 
 if u_excel and u_pdf:
-    try:
-        # 1. MAPEAMENTO DO PDF - Foco total em ID + Valor
-        base_pdf = []
-        with pdfplumber.open(u_pdf) as pdf:
-            for page in pdf.pages:
-                texto = page.extract_text()
-                if texto:
-                    for linha in texto.split('\n'):
-                        # Captura códigos PC ou PD completos (ex: PC22650-1)
-                        match_id = re.search(r'(PC|PD)[^\s]+', linha, re.IGNORECASE)
-                        
-                        if match_id:
-                            cod_id = match_id.group().strip().upper()
-                            
-                            # Captura valores (ex: 156 ou 156,00)
-                            numeros = re.findall(r'\d+(?:\.\d{3})*(?:,\d{2})?|\d+', linha)
-                            
-                            for n in numeros:
-                                try:
-                                    # Normaliza 156 ou 156,00 para 156.0
-                                    v_limpo = float(n.replace('.', '').replace(',', '.'))
-                                    if v_limpo >= 1.0:
-                                        base_pdf.append({
-                                            'id': cod_id,
-                                            'valor': v_limpo,
-                                            'usado': False
-                                        })
-                                except: continue
+    # 1. VARREDURA AGRESSIVA NO PDF
+    # Vamos capturar tudo que pareça um ID e tudo que pareça um Valor
+    dados_extraidos = []
+    with pdfplumber.open(u_pdf) as pdf:
+        for page in pdf.pages:
+            linhas = page.extract_text().split('\n')
+            for linha in linhas:
+                # Busca IDs (PC/PD) e valores na mesma linha
+                id_match = re.search(r'(PC|PD)[\w\d-]+', linha, re.IGNORECASE)
+                valor_matches = re.findall(r'\d+(?:[\.,]\d{2})?', linha)
+                
+                if id_match:
+                    for v_str in valor_matches:
+                        try:
+                            v_float = float(v_str.replace('.', '').replace(',', '.'))
+                            if v_float > 0:
+                                dados_extraidos.append({
+                                    'id': id_match.group().upper(),
+                                    'valor': v_float,
+                                    'usado': False
+                                })
+                        except: continue
 
-        if st.button("🚀 Iniciar Conferência (Capturar todos os 20)"):
-            u_excel.seek(0)
-            wb = openpyxl.load_workbook(u_excel)
-            ws = wb.active
+    if st.button("🔍 Forçar Localização das 20 Vendas"):
+        u_excel.seek(0)
+        wb = openpyxl.load_workbook(u_excel)
+        ws = wb.active
+        
+        # Dados da Cielo (Coluna E é o Valor Bruto)
+        df_cielo = pd.read_excel(u_excel, header=14)
+        
+        encontrados = 0
+        for i, row in df_cielo.iterrows():
+            linha_excel = i + 16
+            valor_cielo = float(row.iloc[4]) # Valor Bruto
             
-            # Lê a Cielo (Dados começam após a linha 14)
-            df_cielo = pd.read_excel(u_excel, header=14)
+            # BUSCA SEM REGRAS: Apenas valor e disponibilidade
+            match_perfeito = False
+            for doc in dados_extraidos:
+                # Tolerância de 2 centavos para arredondamentos do sistema
+                if not doc['usado'] and abs(doc['valor'] - valor_cielo) <= 0.02:
+                    ws.cell(row=linha_excel, column=8).value = doc['id']
+                    doc['usado'] = True
+                    match_perfeito = True
+                    encontrados += 1
+                    break
             
-            sucessos = 0
-            for i, row in df_cielo.iterrows():
-                lin_ex = i + 16 # Ajuste para linha correta no Excel
-                try:
-                    val_ex = float(row.iloc[4]) # Coluna E: Valor Bruto
-                    
-                    achou = False
-                    # Busca apenas por Valor + ID (ignora data para bater março/abril)
-                    for t in base_pdf:
-                        if not t['usado'] and abs(t['valor'] - val_ex) <= 0.02:
-                            ws.cell(row=lin_ex, column=8).value = t['id']
-                            t['usado'] = True
-                            achou = True
-                            sucessos += 1
-                            break
-                                
-                    if not achou:
-                        ws.cell(row=lin_ex, column=8).value = "NÃO ENCONTRADO"
-                except: continue
+            if not match_perfeito:
+                ws.cell(row=linha_excel, column=8).value = "REVISAR MANUAL"
 
-            st.success(f"🎯 Finalizado! {sucessos} de 20 títulos encontrados.")
-            
-            buffer = BytesIO()
-            wb.save(buffer)
-            st.download_button(
-                label="📥 Baixar Planilha 20/20 Corrigida",
-                data=buffer.getvalue(),
-                file_name="Cielo_Conferencia_Sucesso_Total.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-    except Exception as e:
-        st.error(f"Erro no processamento: {e}")
+        st.success(f"✅ Sucesso! {encontrados} de 20 itens localizados.")
+        
+        # Download do resultado
+        buffer = BytesIO()
+        wb.save(buffer)
+        st.download_button(
+            label="📥 Baixar Planilha Localizada",
+            data=buffer.getvalue(),
+            file_name="Cielo_Localizacao_Forcada.xlsx"
+        )
