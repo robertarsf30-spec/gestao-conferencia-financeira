@@ -5,71 +5,77 @@ from io import BytesIO
 import openpyxl
 import re
 
-st.set_page_config(page_title="Localizador Total Cielo", layout="wide")
+st.set_page_config(page_title="Localizador Total 20/20", layout="wide")
 
-st.title("🚀 Localizador de Vendas - Força Bruta (Alvo: 20/20)")
+st.title("🚀 Localizador de Vendas - Força Bruta Total")
+st.markdown("Foco exclusivo em bater o **Valor Bruto** com o **ID do PDF**, ignorando datas.")
 
-u_excel = st.file_uploader("Planilha Cielo", type=['xlsx'])
-u_pdf = st.file_uploader("Relatório Sistema (PDF)", type=['pdf'])
+u_excel = st.file_uploader("1. Planilha Cielo (Original)", type=['xlsx'])
+u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
 
 if u_excel and u_pdf:
-    # 1. VARREDURA AGRESSIVA NO PDF
-    # Vamos capturar tudo que pareça um ID e tudo que pareça um Valor
-    dados_extraidos = []
+    # --- ETAPA 1: MINERAÇÃO EXAUSTIVA DO PDF ---
+    # Capturamos todos os pares possíveis de ID + Valor encontrados em cada linha
+    acervo_pdf = []
     with pdfplumber.open(u_pdf) as pdf:
         for page in pdf.pages:
-            linhas = page.extract_text().split('\n')
-            for linha in linhas:
-                # Busca IDs (PC/PD) e valores na mesma linha
-                id_match = re.search(r'(PC|PD)[\w\d-]+', linha, re.IGNORECASE)
-                valor_matches = re.findall(r'\d+(?:[\.,]\d{2})?', linha)
-                
-                if id_match:
-                    for v_str in valor_matches:
-                        try:
-                            v_float = float(v_str.replace('.', '').replace(',', '.'))
-                            if v_float > 0:
-                                dados_extraidos.append({
-                                    'id': id_match.group().upper(),
-                                    'valor': v_float,
-                                    'usado': False
-                                })
-                        except: continue
+            texto = page.extract_text()
+            if texto:
+                for linha in texto.split('\n'):
+                    # Busca códigos PC/PD (aceita hífens e números longos)
+                    ids_na_linha = re.findall(r'(?:PC|PD)[\w\d-]+', linha, re.IGNORECASE)
+                    # Busca valores monetários
+                    valores_na_linha = re.findall(r'\d+(?:[\.,]\d{2})?', linha)
+                    
+                    if ids_na_linha:
+                        cod_id = ids_na_linha[0].upper()
+                        for v_str in valores_na_linha:
+                            try:
+                                v_float = float(v_str.replace('.', '').replace(',', '.'))
+                                if v_float > 0:
+                                    acervo_pdf.append({'id': cod_id, 'valor': v_float, 'usado': False})
+                            except: continue
 
-    if st.button("🔍 Forçar Localização das 20 Vendas"):
+    if st.button("🔍 Quebrar Regras e Localizar os 20"):
         u_excel.seek(0)
         wb = openpyxl.load_workbook(u_excel)
         ws = wb.active
         
-        # Dados da Cielo (Coluna E é o Valor Bruto)
+        # Lê a Cielo a partir da linha 15 (cabeçalho real)
         df_cielo = pd.read_excel(u_excel, header=14)
         
-        encontrados = 0
+        sucessos = 0
         for i, row in df_cielo.iterrows():
             linha_excel = i + 16
-            valor_cielo = float(row.iloc[4]) # Valor Bruto
-            
-            # BUSCA SEM REGRAS: Apenas valor e disponibilidade
-            match_perfeito = False
-            for doc in dados_extraidos:
-                # Tolerância de 2 centavos para arredondamentos do sistema
-                if not doc['usado'] and abs(doc['valor'] - valor_cielo) <= 0.02:
-                    ws.cell(row=linha_excel, column=8).value = doc['id']
-                    doc['usado'] = True
-                    match_perfeito = True
-                    encontrados += 1
-                    break
-            
-            if not match_perfeito:
-                ws.cell(row=linha_excel, column=8).value = "REVISAR MANUAL"
+            try:
+                # Coluna E (index 4) é o Valor Bruto na sua planilha
+                valor_cielo = float(row.iloc[4]) 
+                
+                encontrou = False
+                # Busca no acervo do PDF sem NENHUMA trava de data
+                for item in acervo_pdf:
+                    if not item['usado'] and abs(item['valor'] - valor_cielo) <= 0.05:
+                        ws.cell(row=linha_excel, column=8).value = item['id']
+                        item['usado'] = True
+                        encontrou = True
+                        sucessos += 1
+                        break
+                
+                if not encontrou:
+                    ws.cell(row=linha_excel, column=8).value = "NÃO LOCALIZADO"
+            except:
+                continue
 
-        st.success(f"✅ Sucesso! {encontrados} de 20 itens localizados.")
-        
-        # Download do resultado
+        if sucessos == 20:
+            st.balloons()
+            st.success("🎯 OBJETIVO ATINGIDO: 20/20 Títulos Localizados!")
+        else:
+            st.warning(f"Vinculados: {sucessos} de 20. Verifique os valores de 15, 24, 30, 52, 85 e 156.")
+
         buffer = BytesIO()
         wb.save(buffer)
         st.download_button(
-            label="📥 Baixar Planilha Localizada",
+            label="📥 Baixar Planilha 20/20 Corrigida",
             data=buffer.getvalue(),
-            file_name="Cielo_Localizacao_Forcada.xlsx"
+            file_name="Cielo_20_de_20_Localizado.xlsx"
         )
