@@ -26,12 +26,13 @@ if u_excel and u_pdf:
                 if texto:
                     for linha in texto.split('\n'):
                         p = linha.split()
+                        # Identifica o título (PC ou PD)
                         if len(p) >= 6 and (p[0].startswith('PC') or p[0].startswith('PD')):
                             try:
                                 cod = p[0]
                                 data_lcto = pd.to_datetime(p[1], dayfirst=True).date()
                                 
-                                # Captura todos os números da linha (Valor Bruto pode estar em qualquer posição)
+                                # Coleta todos os números da linha para achar o valor bruto
                                 valores_linha = []
                                 for item in p[2:]:
                                     num_limpo = item.replace('.', '').replace(',', '.')
@@ -49,7 +50,7 @@ if u_excel and u_pdf:
                             except:
                                 continue
 
-        if st.button("🚀 Iniciar Conferência (Janela de 2 dias)"):
+        if st.button("🚀 Iniciar Conferência Inteligente"):
             u_excel.seek(0)
             wb = openpyxl.load_workbook(u_excel)
             ws = wb.active
@@ -57,23 +58,24 @@ if u_excel and u_pdf:
             
             sucessos = 0
             for i, row in df_cielo.iterrows():
-                lin_ex = i + 16
+                lin_ex = i + 16 # Ajuste para começar na linha 16 do Excel
                 try:
                     data_venda_ex = pd.to_datetime(row.iloc[1], dayfirst=True).date()
                     val_ex = float(row.iloc[4])
                     
                     achou = False
+                    # Busca na base extraída do PDF
                     for t in base_pdf:
                         if not t['usado']:
-                            # LÓGICA ELÁSTICA: Data Lcto (PDF) pode ser até 2 dias após Data Venda (Excel)
+                            # LÓGICA: Data do PDF entre (Data Excel) e (Data Excel + 2 dias)
                             data_limite = data_venda_ex + timedelta(days=2)
                             
                             if data_venda_ex <= t['data'] <= data_limite:
-                                # Verifica se o valor bate com qualquer número da linha do PDF
+                                # Verifica se o valor bate com algum número daquela linha do PDF
                                 for v_pdf in t['valores']:
                                     if abs(v_pdf - val_ex) <= 0.05:
                                         ws.cell(row=lin_ex, column=8).value = f"CONFERIDO ({t['id']})"
-                                        t['usado'] = True
+                                        t['usado'] = True # Marca como usado para não repetir
                                         achou = True
                                         sucessos += 1
                                         break
@@ -84,16 +86,16 @@ if u_excel and u_pdf:
                 except:
                     continue
 
-            st.success(f"🎯 Conferência finalizada! {sucessos} itens vinculados.")
+            st.success(f"🎯 Finalizado! {sucessos} itens vinculados com sucesso.")
             
             buffer = BytesIO()
             wb.save(buffer)
             st.download_button(
-                label="📥 Baixar Planilha Preenchida",
+                label="📥 Baixar Planilha Original Preenchida",
                 data=buffer.getvalue(),
-                file_name="Cielo_Conferencia_Final_99p.xlsx",
+                file_name="Conferencia_Cielo_Final.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
     except Exception as e:
-        st.error(f"Erro técnico: {e}")
+        st.error(f"Erro no processamento: {e}")
