@@ -13,12 +13,12 @@ if 'autenticado' not in st.session_state or not st.session_state.autenticado:
 
 st.title("💳 Conferência Cartão (Cielo)")
 
-u_excel = st.file_uploader("1. Planilha Cielo (Excel)", type=['xlsx'])
+u_excel = st.file_uploader("1. Planilha Cielo Original (Excel)", type=['xlsx'])
 u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
 
 if u_excel and u_pdf:
     try:
-        # 1. LER DADOS DO PDF
+        # 1. PROCESSAR PDF (Extração de Títulos PC/PD e Valores)
         dados_pdf = []
         with pdfplumber.open(u_pdf) as pdf:
             for page in pdf.pages:
@@ -26,55 +26,58 @@ if u_excel and u_pdf:
                 if texto:
                     for linha in texto.split('\n'):
                         partes = linha.split()
-                        # Procura linhas que começam com PC ou PD (seu código de título)
+                        # Verifica se a linha começa com PC ou PD
                         if len(partes) >= 6 and re.match(r'^(PC|PD)', partes[0]):
                             try:
-                                cod_titulo = partes[0]
-                                data_titulo = pd.to_datetime(partes[1], dayfirst=True).date()
-                                # O valor no seu PDF está na penúltima posição antes de 'cielo'
-                                val_limpo = partes[-3].replace('.', '').replace(',', '.')
-                                valor_titulo = float(val_limpo)
-                                dados_pdf.append({'id': cod_titulo, 'dt': data_titulo, 'vl': valor_titulo})
+                                # ID do Título (Ex: PC22650-1)
+                                id_titulo = partes[0]
+                                # Data do Título (2ª parte)
+                                dt_titulo = pd.to_datetime(partes[1], dayfirst=True).date()
+                                # Valor (Penúltima posição antes de textos como 'cielo')
+                                v_texto = partes[-3].replace('.', '').replace(',', '.')
+                                v_num = float(v_texto)
+                                dados_pdf.append({'id': id_titulo, 'data': dt_titulo, 'valor': v_num})
                             except:
                                 continue
         
         df_pdf = pd.DataFrame(dados_pdf)
 
         if st.button("🚀 Iniciar Conferência"):
-            # 2. CARREGAR EXCEL PARA EDIÇÃO (Mantém modelo original)
+            # 2. CARREGAR EXCEL USANDO OPENPYXL PARA MANTER O MODELO
             u_excel.seek(0)
             wb = openpyxl.load_workbook(u_excel)
             ws = wb.active
             
-            # Dados para lógica (Pula as 14 linhas de cabeçalho)
+            # DataFrame auxiliar para leitura (pula as 14 linhas de cabeçalho)
             df_cielo = pd.read_excel(u_excel, header=14)
             
             conferidos = 0
-            # Percorre o Excel (Dados começam na linha 16 do arquivo)
+            # Os dados reais começam na linha 16 do Excel (15 do header + 1)
             for i, row in df_cielo.iterrows():
-                num_linha = i + 16
+                idx_excel = i + 16
                 try:
                     # B = Data (pos 1) | E = Valor Bruto (pos 4)
-                    dt_cielo = pd.to_datetime(row.iloc[1], dayfirst=True).date()
-                    vl_cielo = float(row.iloc[4])
+                    data_c = pd.to_datetime(row.iloc[1], dayfirst=True).date()
+                    valor_c = float(row.iloc[4])
                     
-                    encontrado = False
-                    for _, p in df_pdf.iterrows():
-                        # Bate data exata e valor com margem de 0.05
-                        if p['dt'] == dt_cielo and abs(p['vl'] - vl_cielo) <= 0.05:
-                            # Escreve na coluna H (8) o código que você destacou em amarelo
-                            ws.cell(row=num_linha, column=8).value = f"CONFERIDO ({p['id']})"
-                            encontrado = True
-                            conferidos += 1
-                            break
+                    status = "NÃO ENCONTRADO"
                     
-                    if not encontrado:
-                        ws.cell(row=num_linha, column=8).value = "NÃO ENCONTRADO"
+                    # Comparação direta
+                    if not df_pdf.empty:
+                        for _, p in df_pdf.iterrows():
+                            # Se a data bater e o valor tiver margem de 0.05
+                            if p['data'] == data_c and abs(p['valor'] - valor_c) <= 0.05:
+                                status = f"CONFERIDO ({p['id']})"
+                                conferidos += 1
+                                break
+                    
+                    # Escreve apenas na coluna H (8)
+                    ws.cell(row=idx_excel, column=8).value = status
                 except:
                     continue
 
-            # 3. SUCESSO E DOWNLOAD
-            st.success(f"✅ Sucesso! {conferidos} títulos identificados no PDF.")
+            # 3. FINALIZAÇÃO E DOWNLOAD
+            st.success(f"✅ Sucesso! {conferidos} títulos conferidos e marcados.")
             
             saida = BytesIO()
             wb.save(saida)
@@ -82,7 +85,7 @@ if u_excel and u_pdf:
             st.download_button(
                 label="📥 Baixar Planilha Original Preenchida",
                 data=saida.getvalue(),
-                file_name="Conferencia_Cielo_Final.xlsx",
+                file_name="Cielo_Conferida_Original.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
