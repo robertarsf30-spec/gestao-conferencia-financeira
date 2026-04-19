@@ -1,44 +1,54 @@
 import streamlit as st
 
-# 1. Configuração da Página
+# Configuração da página - Deve ser a primeira linha
 st.set_page_config(page_title="Gestão Financeira", layout="wide")
 
-# 2. Definição da Senha
-# Você pode mudar o "1006" para a senha que preferir
-SENHA_MESTRE = "1006" 
+# 1. Definir a senha mestra
+SENHA_ACESSO = "1006" 
 
-# 3. Inicialização do Estado de Acesso
+# 2. Inicializar o estado de autenticação
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
 
 # --- TELA DE LOGIN ---
 if not st.session_state.autenticado:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.5, 1])
+    # Esconde a barra lateral enquanto não logar
+    st.markdown("""
+        <style>
+            [data-testid="stSidebarNav"] {display: none;}
+        </style>
+    """, unsafe_allow_html=True)
     
+    col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
         st.title("🔐 Login do Sistema")
-        with st.form("login_form"):
-            senha = st.text_input("Digite a Senha de Acesso:", type="password")
-            entrar = st.form_submit_button("Entrar no Painel")
+        st.write("Acesso restrito aos módulos financeiros.")
+        
+        with st.form("login"):
+            senha = st.text_input("Senha:", type="password")
+            btn_entrar = st.form_submit_button("Acessar Sistema")
             
-            if entrar:
-                if senha == SENHA_MESTRE:
+            if btn_entrar:
+                if senha == SENHA_ACESSO:
                     st.session_state.autenticado = True
-                    st.success("Acesso Liberado!")
+                    st.success("Acesso liberado!")
                     st.rerun()
                 else:
-                    st.error("Senha Incorreta. Tente novamente.")
+                    st.error("Senha incorreta!")
 
-# --- SE ESTIVER AUTENTICADO, MOSTRA O CONTEÚDO ---
+# --- SISTEMA DESBLOQUEADO ---
 else:
-    st.sidebar.success("✅ Sistema Desbloqueado")
+    # Mostra a barra lateral e as abas dos módulos
+    st.sidebar.success("✅ Conectado")
     if st.sidebar.button("🚪 Sair"):
         st.session_state.autenticado = False
         st.rerun()
 
-    st.title("🎯 Painel de Controle - Módulos")
-    st.write("Selecione um módulo na barra lateral para começar o trabalho.")
+    st.title("🎯 Painel de Controle")
+    st.info("Utilize o menu lateral para acessar os módulos de conferência.")
     
-    # Aqui o Streamlit automaticamente mostrará as páginas da pasta /pages
-    # (01_Conferencia_Caixa_Banco, 02_Conferencia_Caixa, etc.)
+    # Lista dos seus módulos disponíveis conforme o seu projeto:
+    # - 01_Conferencia_Caixa_Banco
+    # - 02_Conferencia_Caixa
+    # - 03_Conferencia_Cartao
+    # - 04_Modulo_Cobranca
