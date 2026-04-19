@@ -4,83 +4,108 @@ import pdfplumber
 from io import BytesIO
 import openpyxl
 
+# Configuração da página
 st.set_page_config(page_title="Conferência Cartão Cielo", layout="wide")
 
+# Verificação de segurança
 if 'autenticado' not in st.session_state or not st.session_state.autenticado:
     st.error("🔒 Por favor, faça login na página inicial.")
     st.stop()
 
 st.title("💳 Conferência Cartão (Cielo)")
+st.markdown("---")
 
-u_excel = st.file_uploader("1. Planilha Cielo Original (Excel)", type=['xlsx'])
-u_pdf = st.file_uploader("2. Relatório Sistema (PDF)", type=['pdf'])
+u_excel = st.file_uploader("1. Envie a Planilha Cielo (Original)", type=['xlsx'])
+u_pdf = st.file_uploader("2. Envie o Relatório do Sistema (PDF)", type=['pdf'])
 
 if u_excel and u_pdf:
     try:
-        # 1. EXTRAÇÃO SIMPLIFICADA DO PDF
-        lista_pdf = []
+        # --- PASSO 1: LER O PDF COM BUSCA FLEXÍVEL ---
+        dados_pdf = []
         with pdfplumber.open(u_pdf) as pdf:
             for page in pdf.pages:
                 texto = page.extract_text()
-                if texto:
-                    for linha in texto.split('\n'):
-                        p = linha.split()
-                        # Verifica se começa com PC ou PD (ex: PC22650-1)
-                        if len(p) >= 6 and (p[0].startswith('PC') or p[0].startswith('PD')):
-                            try:
-                                # Data na 2ª posição | Valor na antepenúltima
-                                d_v = pd.to_datetime(p[1], dayfirst=True).date()
-                                v_v = float(p[-3].replace('.', '').replace(',', '.'))
-                                lista_pdf.append({'id': p[0], 'data': d_v, 'valor': v_v})
-                            except:
-                                continue
-        
-        df_pdf = pd.DataFrame(lista_pdf)
+                if not texto:
+                    continue
+                
+                for linha in texto.split('\n'):
+                    partes = linha.split()
+                    # Identifica se a linha começa com PC ou PD (seus títulos)
+                    if len(partes) > 5 and (partes[0].startswith('PC') or partes[0].startswith('PD')):
+                        try:
+                            # O código é sempre o primeiro item
+                            codigo_id = partes[0]
+                            # A data é sempre o segundo item
+                            data_venda = pd.to_datetime(partes[1], dayfirst=True).date()
+                            
+                            # BUSCA O VALOR: Varre os itens da linha para achar o valor bruto
+                            # Tentamos converter cada parte para número até achar o valor que bate
+                            valores_da_linha = []
+                            for p in partes[2:]:
+                                num_limpo = p.replace('.', '').replace(',', '.')
+                                try:
+                                    valores_da_linha.append(float(num_limpo))
+                                except:
+                                    continue
+                            
+                            # Adicionamos à nossa base de busca
+                            dados_pdf.append({
+                                'id': codigo_id,
+                                'data': data_venda,
+                                'valores': valores_da_linha
+                            })
+                        except:
+                            continue
 
-        if st.button("🚀 Iniciar Conferência"):
-            # 2. CARREGAR EXCEL ORIGINAL PARA MANTER O MODELO
+        if st.button("🚀 Iniciar Processamento"):
+            # --- PASSO 2: EDITAR O EXCEL ORIGINAL ---
             u_excel.seek(0)
             wb = openpyxl.load_workbook(u_excel)
             ws = wb.active
             
-            # Lê dados (pula 14 linhas de cabeçalho)
+            # Lê para lógica (pula as 14 linhas de cabeçalho da Cielo)
             df_cielo = pd.read_excel(u_excel, header=14)
             
-            conferidos = 0
-            # Percorre o Excel (dados começam na linha 16)
+            sucessos = 0
+            # Varre o Excel a partir da linha 16
             for i, row in df_cielo.iterrows():
-                lin = i + 16
+                num_linha_excel = i + 16
                 try:
-                    dt_c = pd.to_datetime(row.iloc[1], dayfirst=True).date()
-                    vl_c = float(row.iloc[4])
+                    # Coluna B (Data) e E (Valor Bruto)
+                    dt_excel = pd.to_datetime(row.iloc[1], dayfirst=True).date()
+                    vl_excel = float(row.iloc[4])
                     
-                    final = "NÃO ENCONTRADO"
+                    status = "NÃO ENCONTRADO"
                     
-                    if not df_pdf.empty:
-                        for _, p_item in df_pdf.iterrows():
-                            # Bate Data e Valor (margem 0.05)
-                            if p_item['data'] == dt_c and abs(p_item['valor'] - vl_c) <= 0.05:
-                                final = f"CONFERIDO ({p_item['id']})"
-                                conferidos += 1
-                                break
+                    # Busca no banco de dados que criamos do PDF
+                    for item in dados_pdf:
+                        if item['data'] == dt_excel:
+                            # Verifica se o valor do Excel está presente nos números daquela linha do PDF
+                            # Usamos margem de 0.05 para evitar erro de centavos
+                            for v_pdf in item['valores']:
+                                if abs(v_pdf - vl_excel) <= 0.05:
+                                    status = f"CONFERIDO ({item['id']})"
+                                    sucessos += 1
+                                    break
+                            if "CONFERIDO" in status: break
                     
-                    # Escreve na Coluna H (8)
-                    ws.cell(row=lin, column=8).value = final
+                    # Escreve na coluna H (8)
+                    ws.cell(row=num_linha_excel, column=8).value = status
                 except:
                     continue
 
-            st.success(f"✅ Sucesso! {conferidos} itens marcados.")
+            # --- PASSO 3: FINALIZAR E DOWNLOAD ---
+            st.success(f"✅ Conferência Concluída! {sucessos} itens identificados.")
             
-            # 3. DOWNLOAD
-            saida = BytesIO()
-            wb.save(saida)
+            buffer = BytesIO()
+            wb.save(buffer)
             
             st.download_button(
                 label="📥 Baixar Planilha Original Preenchida",
-                data=saida.getvalue(),
-                file_name="Cielo_Conferida.xlsx",
+                data=buffer.getvalue(),
+                file_name="Cielo_Conferida_Original.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Ocorreu um erro inesperado: {e}")
